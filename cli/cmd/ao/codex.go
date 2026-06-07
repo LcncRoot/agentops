@@ -346,6 +346,10 @@ func performCodexStart(cwd string) (codexStartResult, error) {
 		closeLoop = &result
 	}
 
+	if err := runOptionalCMContext(cwd, query); err != nil {
+		VerbosePrintf("Warning: cm startup context: %v\n", err)
+	}
+
 	briefings, learnings, patterns, findings, recentSessions, nextWork, research := collectCodexStartupArtifacts(cwd, query, codexStartLimit)
 	recordLookupCitations(cwd, learnings, patterns, findings, sessionID, query, "retrieved")
 
@@ -469,6 +473,10 @@ func performCodexStop(cwd string) (codexStopResult, error) {
 	closeResult, err := forgeExtractReportWithOptions(transcriptPath, cwd, codexStopAutoExtract, false)
 	if err != nil {
 		return codexStopResult{}, err
+	}
+
+	if err := runOptionalCMReflection(cwd, transcriptPath); err != nil {
+		VerbosePrintf("Warning: cm closeout reflection: %v\n", err)
 	}
 
 	var closeLoop *flywheelCloseLoopResult

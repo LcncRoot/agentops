@@ -121,7 +121,8 @@ mkdir -p "$HOME/.agents/learnings" "$HOME/.agents/patterns" 2>/dev/null
 # Ensure local .agents/ directories exist
 for dir in .agents/research .agents/products .agents/retros .agents/learnings \
            .agents/patterns .agents/council .agents/knowledge/pending \
-           .agents/plans .agents/rpi .agents/ao .agents/handoff \
+           .agents/knowledge/quarantine .agents/briefings .agents/plans \
+           .agents/rpi .agents/ao .agents/handoff \
            .agents/findings .agents/planning-rules .agents/pre-mortem-checks \
            .agents/constraints; do
     mkdir -p "$ROOT/$dir" 2>/dev/null
@@ -222,6 +223,11 @@ if [ -d "$ROOT/.agents/handoff" ] && command -v jq &>/dev/null; then
                 && rm -f "$CONSUMING" 2>/dev/null
         fi
     fi
+fi
+
+CM_CONTEXT_QUERY="$(session_derive_lookup_query "${H_GOAL:-}" "${H_SUMMARY:-}")"
+if declare -F session_run_optional_cm_context >/dev/null 2>&1; then
+    session_run_optional_cm_context "$ROOT" "$CM_CONTEXT_QUERY" || true
 fi
 
 if [ "$STARTUP_CONTEXT_MODE" = "factory" ]; then

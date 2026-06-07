@@ -216,6 +216,64 @@ Use ao codex start and ao codex stop when runtime hooks are unavailable.
 	}
 }
 
+func TestCodexStartJSONWritesCMContextArtifactsWhenCMAvailable(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_THREAD_ID", "019d1bf7-58ea-79e1-9f5d-02109d930081")
+	t.Setenv("CODEX_INTERNAL_ORIGINATOR_OVERRIDE", "Codex Desktop")
+
+	indexPath := filepath.Join(home, ".codex", "session_index.jsonl")
+	if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(indexPath, []byte(`{"id":"019d1bf7-58ea-79e1-9f5d-02109d930081","thread_name":"cm startup context","updated_at":"2026-03-23T12:00:00Z"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	installFakeCM(t, `#!/bin/sh
+if [ "$1" = "context" ]; then
+  printf '%s\n' '{"summary":"Use repo-local memory first.","content":"Start from repo-local durable memory before global playbooks."}'
+  exit 0
+fi
+echo "unexpected cm args: $*" >&2
+exit 1
+`)
+
+	repo := t.TempDir()
+	t.Chdir(repo)
+
+	out, err := executeCommand("codex", "start", "--json", "--no-maintenance", "--query", "cm startup context")
+	if err != nil {
+		t.Fatalf("codex start --json: %v\noutput: %s", err, out)
+	}
+
+	var result codexStartResult
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &result); err != nil {
+		t.Fatalf("parse codex start json: %v\noutput: %s", err, out)
+	}
+
+	rawPath := filepath.Join(repo, ".agents", "ao", "context", "cm-context.json")
+	raw, err := os.ReadFile(rawPath)
+	if err != nil {
+		t.Fatalf("read cm context raw artifact: %v", err)
+	}
+	if !strings.Contains(string(raw), `"summary":"Use repo-local memory first."`) {
+		t.Fatalf("cm context raw artifact missing summary: %s", string(raw))
+	}
+
+	briefingPath := filepath.Join(repo, ".agents", "briefings", "cm-context.md")
+	briefing, err := os.ReadFile(briefingPath)
+	if err != nil {
+		t.Fatalf("read cm briefing: %v", err)
+	}
+	if !strings.Contains(string(briefing), "Use repo-local memory first.") {
+		t.Fatalf("cm briefing missing summary text:\n%s", string(briefing))
+	}
+	if !fileExists(result.StartupContextPath) {
+		t.Fatalf("expected normal codex startup context to exist: %q", result.StartupContextPath)
+	}
+}
+
 func TestWriteCodexStartupContextUsesRankedSectionsAndPolicy(t *testing.T) {
 	repo := setupCodexStartupPolicyRepo(t)
 	path := writeCodexStartupPolicyContext(t, repo)
@@ -616,6 +674,84 @@ func TestCodexStopJSONUsesHistoryFallback(t *testing.T) {
 	if !fileExists(result.TranscriptPath) {
 		t.Fatalf("synthetic transcript path missing: %s", result.TranscriptPath)
 	}
+}
+
+func TestCodexStopJSONWritesCMReflectionArtifactsWhenCMAvailable(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_THREAD_ID", "019d1bf7-58ea-79e1-9f5d-02109d930081")
+	t.Setenv("CODEX_INTERNAL_ORIGINATOR_OVERRIDE", "Codex Desktop")
+
+	sessionID := "019d1bf7-58ea-79e1-9f5d-02109d930081"
+	historyPath := filepath.Join(home, ".codex", "history.jsonl")
+	indexPath := filepath.Join(home, ".codex", "session_index.jsonl")
+	if err := os.MkdirAll(filepath.Dir(historyPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	history := []string{
+		`{"session_id":"` + sessionID + `","ts":1766945655,"text":"Design CM closeout"}`,
+		`{"session_id":"` + sessionID + `","ts":1766945658,"text":"Stage reflection artifacts"}`,
+	}
+	if err := os.WriteFile(historyPath, []byte(strings.Join(history, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(indexPath, []byte(`{"id":"`+sessionID+`","thread_name":"CM closeout","updated_at":"2026-03-23T12:00:00Z"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	installFakeCM(t, `#!/bin/sh
+if [ "$1" = "onboard" ] && [ "$2" = "read" ]; then
+  printf '%s\n' '{"artifacts":[{"title":"CM Reflection","body":"Promote only after Ariston quality gates pass."}]}'
+  exit 0
+fi
+echo "unexpected cm args: $*" >&2
+exit 1
+`)
+
+	repo := t.TempDir()
+	t.Chdir(repo)
+
+	out, err := executeCommand("codex", "stop", "--json")
+	if err != nil {
+		t.Fatalf("codex stop --json: %v\noutput: %s", err, out)
+	}
+
+	var result codexStopResult
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &result); err != nil {
+		t.Fatalf("parse codex stop json: %v\noutput: %s", err, out)
+	}
+	if !fileExists(result.TranscriptPath) {
+		t.Fatalf("expected transcript path to exist: %q", result.TranscriptPath)
+	}
+
+	provenanceGlob := filepath.Join(repo, ".agents", "ao", "provenance", "cm", "*-reflection.json")
+	provenanceMatches, err := filepath.Glob(provenanceGlob)
+	if err != nil {
+		t.Fatalf("glob provenance artifacts: %v", err)
+	}
+	if len(provenanceMatches) != 1 {
+		t.Fatalf("provenance artifacts = %v, want 1 match", provenanceMatches)
+	}
+
+	pendingPath := filepath.Join(repo, ".agents", "knowledge", "pending", time.Now().UTC().Format("2006-01-02")+"-cm-reflection-1.md")
+	pending, err := os.ReadFile(pendingPath)
+	if err != nil {
+		t.Fatalf("read cm pending artifact: %v", err)
+	}
+	if !strings.Contains(string(pending), "Promote only after Ariston quality gates pass.") {
+		t.Fatalf("cm pending artifact missing reflection body:\n%s", string(pending))
+	}
+}
+
+func installFakeCM(t *testing.T, script string) {
+	t.Helper()
+
+	binDir := t.TempDir()
+	path := filepath.Join(binDir, "cm")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 func TestCodexStopJSONSkipsDuplicateCloseoutForSameSession(t *testing.T) {

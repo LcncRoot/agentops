@@ -23,6 +23,11 @@ ROOT="$(cd "$ROOT" 2>/dev/null && pwd -P 2>/dev/null || printf '%s' "$ROOT")"
 AO_DIR="$ROOT/.agents/ao"
 LOCK_FILE="$AO_DIR/session-end-heavy.lock"
 
+if [ -f "$PLUGIN_ROOT/lib/hook-helpers.sh" ]; then
+    # shellcheck source=../lib/hook-helpers.sh
+    . "$PLUGIN_ROOT/lib/hook-helpers.sh"
+fi
+
 mkdir -p "$AO_DIR" 2>/dev/null || true
 
 AO_TIMEOUT_BIN="timeout"
@@ -43,6 +48,10 @@ run_maintenance() {
     # Step 0: Auto-extract learnings while context is fresh (before forge)
     # Note: session close does not support --quiet; removed to prevent silent failure
     run_ao_quick 10 session close --auto-extract || true
+
+    if declare -F session_run_optional_cm_reflection >/dev/null 2>&1; then
+        session_run_optional_cm_reflection "$ROOT" || true
+    fi
 
     FORGE_STATUS=0
     if run_ao_quick 6 forge transcript --last-session --quiet; then

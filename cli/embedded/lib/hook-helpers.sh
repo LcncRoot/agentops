@@ -354,6 +354,117 @@ session_build_factory_briefing() {
     printf '%s' "$path"
 }
 
+session_extract_cm_text() {
+    local raw="$1"
+    local text=""
+
+    if command -v jq >/dev/null 2>&1; then
+        text=$(printf '%s' "$raw" | jq -r '.summary // .briefing // .content // .text // .message // .artifacts[0].body // .artifacts[0].content // .artifacts[0].text // .candidates[0].body // .candidates[0].content // .items[0].body // .items[0].content // empty' 2>/dev/null) || true
+    fi
+
+    text=$(session_trim_lookup_text "$text")
+    printf '%s' "$text"
+}
+
+session_run_optional_cm_context() {
+    local root="$1"
+    local query="$2"
+    local raw raw_path briefing_path summary
+
+    [ "${AGENTOPS_CM_DISABLED:-0}" = "1" ] && return 0
+    query=$(session_trim_lookup_text "$query")
+    [ -n "$query" ] || return 0
+    command -v cm >/dev/null 2>&1 || return 0
+
+    raw=$(timeout_run 12 cm context "$query" --json 2>/dev/null) || return 0
+    [ -n "$raw" ] || return 0
+
+    raw_path="$root/.agents/ao/context/cm-context.json"
+    briefing_path="$root/.agents/briefings/cm-context.md"
+    mkdir -p "$(dirname "$raw_path")" "$(dirname "$briefing_path")" 2>/dev/null || return 0
+    printf '%s\n' "$raw" > "$raw_path" 2>/dev/null || return 0
+
+    summary=$(session_extract_cm_text "$raw")
+    [ -n "$summary" ] || summary="CM returned JSON, but no summary-like text was detected."
+
+    {
+        printf '# CM Context\n\n'
+        printf -- '- Query: %s\n' "$query"
+        printf -- '- Raw artifact: %s\n' "$raw_path"
+        printf -- '- Source: `cm context --json`\n\n'
+        printf '## Summary\n'
+        printf -- '- %s\n' "$summary"
+    } > "$briefing_path" 2>/dev/null || true
+}
+
+session_find_recent_runtime_transcript() {
+    local line
+
+    if [ -n "${AGENTOPS_CM_TRANSCRIPT_PATH:-}" ] && [ -f "${AGENTOPS_CM_TRANSCRIPT_PATH:-}" ]; then
+        printf '%s\n' "${AGENTOPS_CM_TRANSCRIPT_PATH:-}"
+        return 0
+    fi
+
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        printf '%s\n' "${line#*$'\t'}"
+        return 0
+    done < <(
+        {
+            [ -d "$HOME/.claude/sessions" ] && find "$HOME/.claude/sessions" -type f -printf '%T@\t%p\n' 2>/dev/null
+            [ -d "$HOME/.claude/projects" ] && find "$HOME/.claude/projects" -type f -printf '%T@\t%p\n' 2>/dev/null
+        } | sort -nr
+    )
+}
+
+session_run_optional_cm_reflection() {
+    local root="$1"
+    local transcript_path="${2:-}"
+    local raw provenance_dir provenance_path pending_path summary title ts
+
+    [ "${AGENTOPS_CM_DISABLED:-0}" = "1" ] && return 0
+    command -v cm >/dev/null 2>&1 || return 0
+
+    if [ -z "$transcript_path" ]; then
+        transcript_path="$(session_find_recent_runtime_transcript)"
+    fi
+    [ -n "$transcript_path" ] || return 0
+    [ -f "$transcript_path" ] || return 0
+
+    raw=$(timeout_run 15 cm onboard read "$transcript_path" --template --json 2>/dev/null) || return 0
+    [ -n "$raw" ] || return 0
+
+    ts="$(date -u +%Y%m%dT%H%M%SZ)"
+    provenance_dir="$root/.agents/ao/provenance/cm"
+    provenance_path="$provenance_dir/${ts}-reflection.json"
+    pending_path="$root/.agents/knowledge/pending/$(date -u +%Y-%m-%d)-cm-reflection-1.md"
+    mkdir -p "$provenance_dir" "$(dirname "$pending_path")" 2>/dev/null || return 0
+    printf '%s\n' "$raw" > "$provenance_path" 2>/dev/null || return 0
+
+    summary=$(session_extract_cm_text "$raw")
+    [ -n "$summary" ] || summary="$(session_trim_lookup_text "$raw")"
+    [ -n "$summary" ] || return 0
+
+    title="CM Reflection"
+    if command -v jq >/dev/null 2>&1; then
+        title=$(printf '%s' "$raw" | jq -r '.artifacts[0].title // .candidates[0].title // .items[0].title // .title // .name // "CM Reflection"' 2>/dev/null) || title="CM Reflection"
+    fi
+    title=$(session_trim_lookup_text "$title")
+    [ -n "$title" ] || title="CM Reflection"
+
+    {
+        printf -- '---\n'
+        printf 'date: %s\n' "$(date -u +%Y-%m-%d)"
+        printf 'type: learning\n'
+        printf 'source: cm-reflection\n'
+        printf 'provenance_path: %s\n' "$provenance_path"
+        printf 'transcript_path: %s\n' "$transcript_path"
+        printf -- '---\n\n'
+        printf '# %s\n\n' "$title"
+        printf '%s\n' "$summary"
+    } > "$pending_path" 2>/dev/null || true
+}
+
 # session_write_environment_manifest ROOT AO_DIR
 # Writes .agents/ao/environment.json for diagnostics and recovery.
 session_write_environment_manifest() {
