@@ -212,13 +212,15 @@ fi
 [[ -f "$CODEX_HOME/hooks.json" ]] || fail "Missing ~/.codex/hooks.json after native install"
 jq -e '.hooks | type == "object" and length == 5' "$CODEX_HOME/hooks.json" >/dev/null \
   || fail "Expected 5 native Codex hook events in ~/.codex/hooks.json"
-jq -e '[.hooks | to_entries[] | .value[] | .hooks[]] | length == 22' "$CODEX_HOME/hooks.json" >/dev/null \
-  || fail "Expected 22 native Codex hook handlers in ~/.codex/hooks.json"
+jq -e '[.hooks | to_entries[] | .value[] | .hooks[]] | length == 23' "$CODEX_HOME/hooks.json" >/dev/null \
+  || fail "Expected 23 native Codex hook handlers in ~/.codex/hooks.json"
 jq -e '.hooks.SessionStart[]?.hooks[] | select(.command | test("session-start\\.sh$"))' "$CODEX_HOME/hooks.json" >/dev/null \
   || fail "Missing session-start.sh handler in ~/.codex/hooks.json"
 if jq -e '.hooks.SessionStart[]?.hooks[] | select(.command | test("ao-inject\\.sh$"))' "$CODEX_HOME/hooks.json" >/dev/null; then
   fail "Codex SessionStart should not install noisy ao-inject.sh"
 fi
+jq -e '.hooks.Stop[]?.hooks[] | select(.command | test("session-end-maintenance\\.sh$"))' "$CODEX_HOME/hooks.json" >/dev/null \
+  || fail "Missing session-end-maintenance.sh handler in ~/.codex/hooks.json"
 rg -q '"install_mode": "native-plugin"' "$CODEX_HOME/.agentops-codex-install.json" \
   || fail "install metadata missing native-plugin mode"
 rg -q '"hook_runtime": "codex-native-hooks"' "$CODEX_HOME/.agentops-codex-install.json" \

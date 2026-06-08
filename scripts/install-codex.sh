@@ -38,11 +38,19 @@ fi
 echo "Installing AgentOps for Codex..."
 echo ""
 
-for cmd in curl tar; do
-  if ! command -v "$cmd" >/dev/null 2>&1; then
-    fail "Missing required command: $cmd"
-  fi
-done
+if [[ -n "$SOURCE_ROOT_OVERRIDE" ]]; then
+  for cmd in tar; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      fail "Missing required command: $cmd"
+    fi
+  done
+else
+  for cmd in curl tar; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      fail "Missing required command: $cmd"
+    fi
+  done
+fi
 
 if ! command -v codex >/dev/null 2>&1; then
   warn "Codex CLI not found in PATH. Install from https://github.com/openai/codex"

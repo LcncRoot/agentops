@@ -144,18 +144,28 @@ require_path() {
 
 sha256_file() {
   local path="$1"
+  local digest=""
 
   if command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$path" | awk '{print $1}'
-    return
+    digest="$(shasum -a 256 "$path" 2>/dev/null | awk '{print $1}')" || true
+    if [[ -n "$digest" ]]; then
+      printf '%s\n' "$digest"
+      return
+    fi
   fi
   if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$path" | awk '{print $1}'
-    return
+    digest="$(sha256sum "$path" 2>/dev/null | awk '{print $1}')" || true
+    if [[ -n "$digest" ]]; then
+      printf '%s\n' "$digest"
+      return
+    fi
   fi
   if command -v openssl >/dev/null 2>&1; then
-    openssl dgst -sha256 "$path" | awk '{print $NF}'
-    return
+    digest="$(openssl dgst -sha256 "$path" 2>/dev/null | awk '{print $NF}')" || true
+    if [[ -n "$digest" ]]; then
+      printf '%s\n' "$digest"
+      return
+    fi
   fi
 
   fail "Need shasum, sha256sum, or openssl to compute install snapshots"
