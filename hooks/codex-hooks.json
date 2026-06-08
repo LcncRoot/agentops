@@ -28,6 +28,11 @@
           },
           {
             "type": "command",
+            "command": "bash ${AGENTOPS_PLUGIN_ROOT:-~/.codex/plugins/cache/agentops}/hooks/session-end-maintenance.sh",
+            "timeout": 35
+          },
+          {
+            "type": "command",
             "command": "bash ${AGENTOPS_PLUGIN_ROOT:-~/.codex/plugins/cache/agentops}/hooks/ao-flywheel-close.sh",
             "timeout": 15
           }

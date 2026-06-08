@@ -57,8 +57,8 @@ if [[ -f "$CODEX_HOOKS_JSON" ]]; then
         && pass "hooks/codex-hooks.json is valid JSON" || fail "hooks/codex-hooks.json is invalid JSON"
     jq -e '.hooks | type == "object" and length == 5' "$CODEX_HOOKS_JSON" >/dev/null 2>&1 \
         && pass "codex hook bundle defines 5 native hook events" || fail "codex hook bundle event map is unexpectedly small"
-    jq -e '[.hooks | to_entries[] | .value[] | .hooks[]] | length == 22' "$CODEX_HOOKS_JSON" >/dev/null 2>&1 \
-        && pass "codex hook bundle defines 22 native hook handlers" || fail "codex hook bundle handler count drifted"
+    jq -e '[.hooks | to_entries[] | .value[] | .hooks[]] | length == 23' "$CODEX_HOOKS_JSON" >/dev/null 2>&1 \
+        && pass "codex hook bundle defines 23 native hook handlers" || fail "codex hook bundle handler count drifted"
     if jq -e '.hooks.SessionStart[]?.hooks[] | select(.command | test("session-start\\.sh$"))' "$CODEX_HOOKS_JSON" >/dev/null 2>&1; then
         pass "codex hook bundle includes session-start.sh"
     else
@@ -73,6 +73,11 @@ if [[ -f "$CODEX_HOOKS_JSON" ]]; then
         pass "codex hook bundle includes ao-flywheel-close.sh"
     else
         fail "codex hook bundle missing ao-flywheel-close.sh"
+    fi
+    if jq -e '.hooks.Stop[]?.hooks[] | select(.command | test("session-end-maintenance\\.sh$"))' "$CODEX_HOOKS_JSON" >/dev/null 2>&1; then
+        pass "codex hook bundle includes session-end-maintenance.sh"
+    else
+        fail "codex hook bundle missing session-end-maintenance.sh"
     fi
 else
     fail "hooks/codex-hooks.json not found"

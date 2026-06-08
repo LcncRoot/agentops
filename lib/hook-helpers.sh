@@ -290,6 +290,52 @@ session_trim_lookup_text() {
         | sed 's/^ //; s/ $//'
 }
 
+session_read_codex_thread_name() {
+    local home_dir index_path session_id thread_name
+
+    home_dir="${HOME:-}"
+    session_id="$(session_trim_lookup_text "${CODEX_THREAD_ID:-}")"
+    [ -n "$home_dir" ] || return 0
+    [ -n "$session_id" ] || return 0
+
+    index_path="$home_dir/.codex/session_index.jsonl"
+    [ -f "$index_path" ] || return 0
+    command -v jq >/dev/null 2>&1 || return 0
+
+    thread_name=$(
+        jq -r --arg id "$session_id" '
+            select(.id == $id)
+            | .thread_name // empty
+        ' "$index_path" 2>/dev/null | tail -n 1
+    ) || true
+    thread_name="$(session_trim_lookup_text "$thread_name")"
+    [ -n "$thread_name" ] || return 0
+    printf '%s' "$thread_name"
+}
+
+session_runtime_default_query() {
+    local thread_name repo_name
+
+    if [ -n "${AGENTOPS_SESSION_LOOKUP_QUERY:-}" ]; then
+        session_trim_lookup_text "$AGENTOPS_SESSION_LOOKUP_QUERY"
+        return 0
+    fi
+
+    thread_name="$(session_read_codex_thread_name)"
+    if [ -n "$thread_name" ]; then
+        printf '%s' "$thread_name"
+        return 0
+    fi
+
+    repo_name="$(basename "${ROOT:-.}")"
+    repo_name="$(session_trim_lookup_text "$repo_name")"
+    if [ -n "$repo_name" ] && [ "$repo_name" != "." ]; then
+        printf '%s' "$repo_name"
+        return 0
+    fi
+    return 0
+}
+
 # session_resolve_startup_context_mode
 # Returns factory or manual. Legacy inject env opts into manual mode.
 session_resolve_startup_context_mode() {
@@ -331,6 +377,7 @@ session_derive_lookup_query() {
         session_trim_lookup_text "$handoff_summary"
         return 0
     fi
+    session_runtime_default_query
     return 0
 }
 
