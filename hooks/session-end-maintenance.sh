@@ -36,10 +36,10 @@ command -v "$AO_TIMEOUT_BIN" >/dev/null 2>&1 || AO_TIMEOUT_BIN="gtimeout"
 run_ao_quick() {
     local seconds="$1"; shift
     if command -v "$AO_TIMEOUT_BIN" >/dev/null 2>&1; then
-        "$AO_TIMEOUT_BIN" "$seconds" ao "$@" 2>/dev/null
+        agentops_run_with_real_home "$AO_TIMEOUT_BIN" "$seconds" ao "$@" 2>/dev/null
         return $?
     fi
-    ao "$@" 2>/dev/null
+    agentops_run_with_real_home ao "$@" 2>/dev/null
 }
 
 run_maintenance() {

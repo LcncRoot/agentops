@@ -81,6 +81,30 @@ if [[ -z "${ROOT:-}" ]]; then
   ROOT="$(cd "$ROOT" 2>/dev/null && pwd -P 2>/dev/null || printf '%s' "$ROOT")"
 fi
 
+agentops_resolve_real_home() {
+    local candidate="${ARISTON_HOME:-}"
+
+    if [[ -z "$candidate" || ! -d "$candidate" ]]; then
+        candidate="$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f6)"
+    fi
+    if [[ -z "$candidate" || ! -d "$candidate" ]]; then
+        candidate="${HOME:-}"
+    fi
+    printf '%s' "$candidate"
+}
+
+AGENTOPS_REAL_HOME="${AGENTOPS_REAL_HOME:-$(agentops_resolve_real_home)}"
+export AGENTOPS_REAL_HOME
+
+if [[ -f "$AGENTOPS_REAL_HOME/.agents/env.sh" ]]; then
+  # shellcheck source=/home/dand/.agents/env.sh
+  . "$AGENTOPS_REAL_HOME/.agents/env.sh"
+fi
+
+agentops_run_with_real_home() {
+    HOME="$AGENTOPS_REAL_HOME" "$@"
+}
+
 # Source the canonical state-path resolver (lib/ao-paths.sh from soc-irg1.1).
 # The resolver exports AO_AGENTS_DIR (and friends) honoring AO_HOME /
 # CLAUDE_PLUGIN_DATA / repo-root precedence. Guard the source so a missing
@@ -290,6 +314,58 @@ session_trim_lookup_text() {
         | sed 's/^ //; s/ $//'
 }
 
+session_read_codex_thread_name() {
+    local home_dir index_path session_id thread_name
+
+    session_id="$(session_trim_lookup_text "${CODEX_THREAD_ID:-}")"
+    [ -n "$session_id" ] || return 0
+    command -v jq >/dev/null 2>&1 || return 0
+
+    if [ -n "${CODEX_HOME:-}" ] && [ -f "${CODEX_HOME}/session_index.jsonl" ]; then
+        index_path="${CODEX_HOME}/session_index.jsonl"
+    elif [ -f "${AGENTOPS_REAL_HOME}/.codex/session_index.jsonl" ]; then
+        index_path="${AGENTOPS_REAL_HOME}/.codex/session_index.jsonl"
+    else
+        home_dir="${HOME:-}"
+        [ -n "$home_dir" ] || return 0
+        index_path="$home_dir/.codex/session_index.jsonl"
+        [ -f "$index_path" ] || return 0
+    fi
+
+    thread_name=$(
+        jq -r --arg id "$session_id" '
+            select(.id == $id)
+            | .thread_name // empty
+        ' "$index_path" 2>/dev/null | tail -n 1
+    ) || true
+    thread_name="$(session_trim_lookup_text "$thread_name")"
+    [ -n "$thread_name" ] || return 0
+    printf '%s' "$thread_name"
+}
+
+session_runtime_default_query() {
+    local thread_name repo_name
+
+    if [ -n "${AGENTOPS_SESSION_LOOKUP_QUERY:-}" ]; then
+        session_trim_lookup_text "$AGENTOPS_SESSION_LOOKUP_QUERY"
+        return 0
+    fi
+
+    thread_name="$(session_read_codex_thread_name)"
+    if [ -n "$thread_name" ]; then
+        printf '%s' "$thread_name"
+        return 0
+    fi
+
+    repo_name="$(basename "${ROOT:-.}")"
+    repo_name="$(session_trim_lookup_text "$repo_name")"
+    if [ -n "$repo_name" ] && [ "$repo_name" != "." ]; then
+        printf '%s' "$repo_name"
+        return 0
+    fi
+    return 0
+}
+
 # session_resolve_startup_context_mode
 # Returns factory or manual. Legacy inject env opts into manual mode.
 session_resolve_startup_context_mode() {
@@ -331,6 +407,7 @@ session_derive_lookup_query() {
         session_trim_lookup_text "$handoff_summary"
         return 0
     fi
+    session_runtime_default_query
     return 0
 }
 
@@ -344,7 +421,7 @@ session_build_factory_briefing() {
     command -v ao >/dev/null 2>&1 || return 0
     command -v jq >/dev/null 2>&1 || return 0
 
-    output=$(timeout_run 8 ao knowledge brief --json --goal "$goal" 2>/dev/null) || return 0
+    output=$(timeout_run 8 agentops_run_with_real_home ao knowledge brief --json --goal "$goal" 2>/dev/null) || return 0
     [ -n "$output" ] || return 0
 
     path=$(printf '%s' "$output" | jq -r '.output_path // empty' 2>/dev/null)
@@ -376,7 +453,7 @@ session_run_optional_cm_context() {
     [ -n "$query" ] || return 0
     command -v cm >/dev/null 2>&1 || return 0
 
-    raw=$(timeout_run 12 cm context "$query" --json 2>/dev/null) || return 0
+    raw=$(timeout_run 12 agentops_run_with_real_home cm context "$query" --json 2>/dev/null) || return 0
     [ -n "$raw" ] || return 0
 
     raw_path="$root/.agents/ao/context/cm-context.json"
@@ -398,7 +475,9 @@ session_run_optional_cm_context() {
 }
 
 session_find_recent_runtime_transcript() {
-    local line
+    local line home_root
+
+    home_root="${AGENTOPS_REAL_HOME:-${HOME:-}}"
 
     if [ -n "${AGENTOPS_CM_TRANSCRIPT_PATH:-}" ] && [ -f "${AGENTOPS_CM_TRANSCRIPT_PATH:-}" ]; then
         printf '%s\n' "${AGENTOPS_CM_TRANSCRIPT_PATH:-}"
@@ -411,8 +490,8 @@ session_find_recent_runtime_transcript() {
         return 0
     done < <(
         {
-            [ -d "$HOME/.claude/sessions" ] && find "$HOME/.claude/sessions" -type f -printf '%T@\t%p\n' 2>/dev/null
-            [ -d "$HOME/.claude/projects" ] && find "$HOME/.claude/projects" -type f -printf '%T@\t%p\n' 2>/dev/null
+            [ -d "$home_root/.claude/sessions" ] && find "$home_root/.claude/sessions" -type f -printf '%T@\t%p\n' 2>/dev/null
+            [ -d "$home_root/.claude/projects" ] && find "$home_root/.claude/projects" -type f -printf '%T@\t%p\n' 2>/dev/null
         } | sort -nr
     )
 }
@@ -431,7 +510,7 @@ session_run_optional_cm_reflection() {
     [ -n "$transcript_path" ] || return 0
     [ -f "$transcript_path" ] || return 0
 
-    raw=$(timeout_run 15 cm onboard read "$transcript_path" --template --json 2>/dev/null) || return 0
+    raw=$(timeout_run 15 agentops_run_with_real_home cm onboard read "$transcript_path" --template --json 2>/dev/null) || return 0
     [ -n "$raw" ] || return 0
 
     ts="$(date -u +%Y%m%dT%H%M%SZ)"

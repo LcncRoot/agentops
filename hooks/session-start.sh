@@ -116,7 +116,7 @@ fi
 cd "$ROOT" 2>/dev/null || true
 
 # Ensure global .agents/ directories exist (cross-repo knowledge)
-mkdir -p "$HOME/.agents/learnings" "$HOME/.agents/patterns" 2>/dev/null
+mkdir -p "$AGENTOPS_REAL_HOME/.agents/learnings" "$AGENTOPS_REAL_HOME/.agents/patterns" 2>/dev/null
 
 # Ensure local .agents/ directories exist
 for dir in .agents/research .agents/products .agents/retros .agents/learnings \
@@ -143,7 +143,7 @@ rm -f "$ROOT/.agents/ao/.factory-router-fired" \
 
 # Auto-cleanup stale RPI runs (lightweight, <1s, dry-run only)
 if command -v ao &>/dev/null; then
-    ao rpi cleanup --all --stale-after 24h --dry-run >/dev/null 2>&1 || true
+    agentops_run_with_real_home ao rpi cleanup --all --stale-after 24h --dry-run >/dev/null 2>&1 || true
 fi
 
 # Auto-promote pending forge candidates (Tier 0 → Tier 1)
@@ -152,7 +152,7 @@ fi
 # (mol-qwx4): unconditional startup close-loop + non-idempotent pending lifecycle
 # turned a 47-file batch into 11k+ duplicate artifacts.
 if [ "${AGENTOPS_STARTUP_CLOSE_LOOP:-0}" = "1" ] && command -v ao &>/dev/null; then
-    ao flywheel close-loop --quiet >/dev/null 2>&1 || true
+    agentops_run_with_real_home ao flywheel close-loop --quiet >/dev/null 2>&1 || true
 fi
 
 # Always gitignore repo-root .agents/. It is local agent runtime state and must
